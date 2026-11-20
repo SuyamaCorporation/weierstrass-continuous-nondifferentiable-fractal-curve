@@ -1,0 +1,173 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>ワイエルシュトラス関数フラクタル曲線</title>
+<script src="https://cdn.tailwindcss.com"></script>
+</head>
+<body class="bg-slate-950 text-slate-100 min-h-screen">
+<div class="max-w-3xl mx-auto px-4 py-6">
+  <header class="text-center mb-6">
+    <h1 class="text-2xl font-bold text-cyan-300 mb-1">ワイエルシュトラス関数フラクタル</h1>
+    <p class="text-slate-500 text-xs">f(x) = Σ aⁿ cos(bⁿπx)　連続だが至る所微分不可能な関数</p>
+  </header>
+
+  <canvas id="canvas" width="740" height="400" class="w-full rounded-xl border border-slate-700 bg-slate-900 block mb-4" aria-label="ワイエルシュトラス関数のグラフ"></canvas>
+
+  <div class="grid grid-cols-1 md:grid-cols-3 gap-4 mb-4">
+    <div class="bg-slate-800 rounded-xl p-4">
+      <label for="paramA" class="block text-sm text-cyan-400 mb-2">パラメータ a（0 &lt; a &lt; 1）: <span id="valA" class="text-white font-bold">0.5</span></label>
+      <input id="paramA" type="range" min="0.1" max="0.99" step="0.01" value="0.5" class="w-full accent-cyan-400" aria-label="パラメータaを設定" oninput="onParamChange()">
+      <div class="text-xs text-slate-500 mt-1">小さいほど高周波成分が弱い</div>
+    </div>
+    <div class="bg-slate-800 rounded-xl p-4">
+      <label for="paramB" class="block text-sm text-cyan-400 mb-2">パラメータ b（奇数整数）: <span id="valB" class="text-white font-bold">7</span></label>
+      <input id="paramB" type="range" min="3" max="21" step="2" value="7" class="w-full accent-cyan-400" aria-label="パラメータbを設定" oninput="onParamChange()">
+      <div class="text-xs text-slate-500 mt-1">大きいほどギザギザが細かい</div>
+    </div>
+    <div class="bg-slate-800 rounded-xl p-4">
+      <label for="zoomLevel" class="block text-sm text-cyan-400 mb-2">ズーム: <span id="valZoom" class="text-white font-bold">1.0x</span></label>
+      <input id="zoomLevel" type="range" min="1" max="200" step="1" value="1" class="w-full accent-cyan-400" aria-label="ズームレベルを設定" oninput="onParamChange()">
+      <div class="text-xs text-slate-500 mt-1">拡大して自己相似性を探索</div>
+    </div>
+  </div>
+
+  <div class="grid grid-cols-2 gap-3 mb-4">
+    <div class="bg-slate-800 rounded-xl p-4">
+      <label for="centerX" class="block text-sm text-slate-400 mb-2">中心 X: <span id="valCenterX" class="text-white font-bold">0.0</span></label>
+      <input id="centerX" type="range" min="-500" max="500" step="1" value="0" class="w-full accent-slate-400" aria-label="中心X位置" oninput="onParamChange()">
+    </div>
+    <div class="bg-slate-800 rounded-xl p-4">
+      <label for="termsN" class="block text-sm text-slate-400 mb-2">項数 N: <span id="valN" class="text-white font-bold">20</span></label>
+      <input id="termsN" type="range" min="5" max="50" step="1" value="20" class="w-full accent-slate-400" aria-label="級数の項数" oninput="onParamChange()">
+    </div>
+  </div>
+
+  <div class="grid grid-cols-3 gap-2 mb-4">
+    <button onclick="setPreset(0.5, 7)" class="bg-slate-700 hover:bg-slate-600 text-slate-200 text-xs py-2 rounded-lg transition" aria-label="標準プリセット">標準 (a=0.5, b=7)</button>
+    <button onclick="setPreset(0.7, 13)" class="bg-slate-700 hover:bg-slate-600 text-slate-200 text-xs py-2 rounded-lg transition" aria-label="中間プリセット">中間 (a=0.7, b=13)</button>
+    <button onclick="setPreset(0.9, 7)" class="bg-slate-700 hover:bg-slate-600 text-slate-200 text-xs py-2 rounded-lg transition" aria-label="高密度プリセット">高密度 (a=0.9, b=7)</button>
+  </div>
+
+  <div class="bg-slate-800 border border-slate-700 rounded-xl p-4 text-xs text-slate-400">
+    <div class="font-bold text-slate-200 mb-1">ワイエルシュトラス関数とは</div>
+    <p>1872年にカール・ワイエルシュトラスが発表した関数。連続でありながら、すべての点で微分不可能という当時の数学者を驚かせた「病的関数」。
+    条件: a·b &gt; 1 + 3π/2 のとき微分不可能が保証される。フラクタル次元は 2 + ln(a)/ln(b)。</p>
+  </div>
+</div>
+
+<script>
+const canvas = document.getElementById('canvas');
+const ctx = canvas.getContext('2d');
+let animReq = null;
+let dirty = true;
+
+function weierstrass(x, a, b, N) {
+  let sum = 0;
+  for (let n = 0; n <= N; n++) {
+    sum += Math.pow(a, n) * Math.cos(Math.pow(b, n) * Math.PI * x);
+  }
+  return sum;
+}
+
+function draw() {
+  const a = parseFloat(document.getElementById('paramA').value);
+  const b = parseInt(document.getElementById('paramB').value);
+  const zoom = parseFloat(document.getElementById('zoomLevel').value);
+  const centerX = parseFloat(document.getElementById('centerX').value) / 100;
+  const N = parseInt(document.getElementById('termsN').value);
+
+  const W = canvas.width;
+  const H = canvas.height;
+
+  ctx.fillStyle = '#0f172a';
+  ctx.fillRect(0, 0, W, H);
+
+  // Grid
+  ctx.strokeStyle = '#1e293b';
+  ctx.lineWidth = 1;
+  for (let i = 0; i <= 10; i++) {
+    const x = i * W / 10;
+    ctx.beginPath(); ctx.moveTo(x, 0); ctx.lineTo(x, H); ctx.stroke();
+    const y = i * H / 10;
+    ctx.beginPath(); ctx.moveTo(0, y); ctx.lineTo(W, y); ctx.stroke();
+  }
+
+  // Axes
+  ctx.strokeStyle = '#334155';
+  ctx.lineWidth = 1.5;
+  ctx.beginPath(); ctx.moveTo(0, H/2); ctx.lineTo(W, H/2); ctx.stroke();
+  ctx.beginPath(); ctx.moveTo(W/2, 0); ctx.lineTo(W/2, H); ctx.stroke();
+
+  // Draw Weierstrass function
+  const xRange = 4 / zoom;
+  const xStart = centerX - xRange / 2;
+  const xEnd = centerX + xRange / 2;
+
+  // Compute value range for auto-scaling
+  const samples = 200;
+  let minY = Infinity, maxY = -Infinity;
+  for (let i = 0; i <= samples; i++) {
+    const x = xStart + (i / samples) * (xEnd - xStart);
+    const y = weierstrass(x, a, b, N);
+    if (y < minY) minY = y;
+    if (y > maxY) maxY = y;
+  }
+  const yRange = maxY - minY || 2;
+  const yPad = yRange * 0.1;
+
+  function toCanvasX(x) { return (x - xStart) / (xEnd - xStart) * W; }
+  function toCanvasY(y) { return H - (y - minY + yPad) / (yRange + 2 * yPad) * H; }
+
+  // Draw curve with color gradient
+  const steps = W * 2;
+  ctx.lineWidth = 1.5;
+  ctx.beginPath();
+  for (let i = 0; i <= steps; i++) {
+    const x = xStart + (i / steps) * (xEnd - xStart);
+    const y = weierstrass(x, a, b, N);
+    const cx = toCanvasX(x);
+    const cy = toCanvasY(y);
+    if (i === 0) ctx.moveTo(cx, cy);
+    else ctx.lineTo(cx, cy);
+  }
+
+  // Gradient stroke
+  const grad = ctx.createLinearGradient(0, 0, W, 0);
+  grad.addColorStop(0, '#06b6d4');
+  grad.addColorStop(0.5, '#8b5cf6');
+  grad.addColorStop(1, '#06b6d4');
+  ctx.strokeStyle = grad;
+  ctx.stroke();
+
+  // Labels
+  ctx.fillStyle = '#64748b';
+  ctx.font = '11px monospace';
+  ctx.fillText('a=' + a.toFixed(2) + '  b=' + b + '  N=' + N + '  zoom=' + zoom + 'x', 8, 16);
+  ctx.fillText('f(x)=Σ aⁿcos(bⁿπx)', 8, H - 8);
+}
+
+function onParamChange() {
+  document.getElementById('valA').textContent = parseFloat(document.getElementById('paramA').value).toFixed(2);
+  document.getElementById('valB').textContent = document.getElementById('paramB').value;
+  document.getElementById('valZoom').textContent = parseFloat(document.getElementById('zoomLevel').value).toFixed(1) + 'x';
+  document.getElementById('valCenterX').textContent = (parseFloat(document.getElementById('centerX').value) / 100).toFixed(2);
+  document.getElementById('valN').textContent = document.getElementById('termsN').value;
+  draw();
+}
+
+function setPreset(a, b) {
+  document.getElementById('paramA').value = a;
+  document.getElementById('paramB').value = b;
+  document.getElementById('zoomLevel').value = 1;
+  document.getElementById('centerX').value = 0;
+  onParamChange();
+}
+
+window.onload = () => {
+  onParamChange();
+};
+</script>
+</body>
+</html>
